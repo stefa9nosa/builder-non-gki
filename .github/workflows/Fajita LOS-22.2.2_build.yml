@@ -1,0 +1,17 @@
+name: KernelSU Build - Fajita (LineageOS 22.2.2)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Compile Kernel for OnePlus 6T (fajita)
+    steps:
+      - name: KernelSU Build - OnePlus 6T fajita
+        uses: kernel-build-from-rainyland/builder-non-gki@main
+        with:
+          ksu_branch: main
+          kernel_link: https://github.com/LineageOS/android_kernel_oneplus_sdm845
+          kernel_branch: lineage-21
+          defconfig: lineage_fajita_defconfig
