@@ -1,4 +1,4 @@
-name: KernelSU Build - Fajita (LineageOS 22.2.2)
+name: KernelSU Build - OnePlus 6T (fajita)
 
 on:
   workflow_dispatch:
@@ -6,43 +6,51 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    name: Compile Kernel with KernelSU
+
     steps:
-      - name: Install required packages
+      - name: Install build dependencies
         run: |
           sudo apt update
-          sudo apt install -y git wget build-essential bc bison flex libssl-dev libncurses5-dev libelf-dev ccache
+          sudo apt install -y git wget build-essential bc bison flex libssl-dev \
+            libncurses5-dev libelf-dev ccache python-is-python3
 
-      - name: Clone Kernel source
+      - name: Clone LineageOS Kernel source
         run: |
-          git clone --depth=1 --branch lineage-21 https://github.com/LineageOS/android_kernel_oneplus_sdm845 kernel
+          git clone --depth=1 --branch lineage-21 https://github.com/LineageOS/android_kernel_oneplus_sdm845.git kernel
 
       - name: Clone KernelSU
         run: |
-          git clone --depth=1 https://github.com/tiann/KernelSU
+          git clone --depth=1 https://github.com/tiann/KernelSU.git
+
+      - name: Apply KernelSU patch
+        run: |
           cd kernel
-          echo '### Injecting KernelSU ###'
+          echo -e "\n# KernelSU integration" >> Makefile
           echo "KERNELSU := yes" >> Makefile
           echo "KERNELSU_KERNELDIR := ../KernelSU" >> Makefile
 
-      - name: Set up toolchain
+      - name: Download Neutron Clang toolchain
         run: |
-          mkdir toolchain && cd toolchain
-          git clone --depth=1 https://github.com/Neutron-Toolchains/aarch64-linux-android-clang
-          export PATH=$PATH:$(pwd)/aarch64-linux-android-clang/bin
+          mkdir clang && cd clang
+          git clone --depth=1 https://github.com/Neutron-Toolchains/aarch64-linux-android-clang.git
+          echo "TOOLCHAIN_PATH=$(pwd)/aarch64-linux-android-clang/bin" >> $GITHUB_ENV
 
-      - name: Compile kernel
+      - name: Build kernel
         run: |
           cd kernel
           export ARCH=arm64
           export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-android-
           export KBUILD_BUILD_USER="rainy"
           export KBUILD_BUILD_HOST="github"
-          make lineage_fajita_defconfig
-          make -j$(nproc)
+          export CROSS_COMPILE=aarch64-linux-android-
+          export PATH=$TOOLCHAIN_PATH:$PATH
 
-      - name: Upload artifact
+          make O=out lineage_fajita_defconfig
+          make -j$(nproc) O=out
+
+      - name: Upload compiled kernel
         uses: actions/upload-artifact@v3
         with:
-          name: kernel-out
-          path: kernel/arch/arm64/boot/Image.gz-dtb
+          name: Image.gz-dtb
+          path: kernel/out/arch/arm64/boot/Image.gz-dtb
