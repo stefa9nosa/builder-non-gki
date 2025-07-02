@@ -6,12 +6,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Compile Kernel for OnePlus 6T (fajita)
     steps:
-      - name: KernelSU Build - OnePlus 6T fajita
-        uses: kernel-build-from-rainyland/builder-non-gki@main
-        with:
-          ksu_branch: main
-          kernel_link: https://github.com/LineageOS/android_kernel_oneplus_sdm845
-          kernel_branch: lineage-21
-          defconfig: lineage_fajita_defconfig
+      - name: Checkout KernelSU Builder
+        uses: actions/checkout@v3
+
+      - name: Clone builder-non-gki
+        run: git clone https://github.com/kernel-build-from-rainyland/builder-non-gki builder
+
+      - name: Run KernelSU builder script
+        run: |
+          cd builder
+          bash build.sh \
+            --ksu_branch main \
+            --kernel_link https://github.com/LineageOS/android_kernel_oneplus_sdm845 \
+            --kernel_branch lineage-21 \
+            --defconfig lineage_fajita_defconfig
