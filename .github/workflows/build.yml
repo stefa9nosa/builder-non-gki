@@ -7,17 +7,42 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout KernelSU Builder
-        uses: actions/checkout@v3
-
-      - name: Clone builder-non-gki
-        run: git clone https://github.com/kernel-build-from-rainyland/builder-non-gki builder
-
-      - name: Run KernelSU builder script
+      - name: Install required packages
         run: |
-          cd builder
-          bash build.sh \
-            --ksu_branch main \
-            --kernel_link https://github.com/LineageOS/android_kernel_oneplus_sdm845 \
-            --kernel_branch lineage-21 \
-            --defconfig lineage_fajita_defconfig
+          sudo apt update
+          sudo apt install -y git wget build-essential bc bison flex libssl-dev libncurses5-dev libelf-dev ccache
+
+      - name: Clone Kernel source
+        run: |
+          git clone --depth=1 --branch lineage-21 https://github.com/LineageOS/android_kernel_oneplus_sdm845 kernel
+
+      - name: Clone KernelSU
+        run: |
+          git clone --depth=1 https://github.com/tiann/KernelSU
+          cd kernel
+          echo '### Injecting KernelSU ###'
+          echo "KERNELSU := yes" >> Makefile
+          echo "KERNELSU_KERNELDIR := ../KernelSU" >> Makefile
+
+      - name: Set up toolchain
+        run: |
+          mkdir toolchain && cd toolchain
+          git clone --depth=1 https://github.com/Neutron-Toolchains/aarch64-linux-android-clang
+          export PATH=$PATH:$(pwd)/aarch64-linux-android-clang/bin
+
+      - name: Compile kernel
+        run: |
+          cd kernel
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export KBUILD_BUILD_USER="rainy"
+          export KBUILD_BUILD_HOST="github"
+          make lineage_fajita_defconfig
+          make -j$(nproc)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: kernel-out
+          path: kernel/arch/arm64/boot/Image.gz-dtb
