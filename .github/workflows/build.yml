@@ -1,56 +1,460 @@
 name: KernelSU Build - OnePlus 6T (fajita)
 
+env:
+  OUT_DIR: "${{ github.workspace }}/out"
+
 on:
   workflow_dispatch:
+    inputs:
+      config_type:
+        description: 'Choose a config type'
+        required: true
+        type: choice
+        default: 'production'
+        options:
+          - production
+          - development
+      config_mode:
+        description: 'Choose a root solution, if this not empty, it will only build that specific type'
+        required: false
+        type: choice
+        default: 'everything'
+        options:
+          - everything
+          - ksun
+          - sukisu
+          - vanilla
+          - kp
+      config_file:
+        description: 'Path to a specific config JSON file (optional). Leave blank to use all configs.'
+        required: false
+        default: ''
+        type: string
+      release_mode:
+        description: 'Create a release for this run?'
+        required: true
+        type: choice
+        default: 'false'
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: write
+  discussions: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    name: Compile Kernel with KernelSU
-
+  Set-repos:
+    name: "Parse configs.json (specific or all)"
+    runs-on: ubuntu-24.04
+    outputs:
+      repos: ${{ steps.generate-matrix.outputs.repos }}
+      builddate: ${{ steps.generate-builddate.outputs.builddate }}
     steps:
-      - name: Install build dependencies
+      - name: "Checkout"
+        uses: actions/checkout@v3
+      - name: "Generate Matrix from config"
+        id: generate-matrix
         run: |
-          sudo apt update
-          sudo apt install -y git wget build-essential bc bison flex libssl-dev \
-            libncurses5-dev libelf-dev ccache python-is-python3
+          CONFIG_FILE="${{ github.event.inputs.config_file }}"
+          CONFIG_TYPE="${{ github.event.inputs.config_type }}"
+          CONFIG_MODE="${{ github.event.inputs.config_mode }}"
 
-      - name: Clone LineageOS Kernel source
+          echo "Selected config file: '$CONFIG_FILE'"
+
+          if [ -n "$CONFIG_FILE" ]; then
+            # User provided config file, check if exists
+            if [ -f "./.github/configs/$CONFIG_TYPE/$CONFIG_FILE" ]; then
+              echo "Using specified config file: ./.github/configs/$CONFIG_TYPE/$CONFIG_FILE"
+              echo "repos<<EOF" >> $GITHUB_OUTPUT
+              jq -s '[.[]]' "./.github/configs/$CONFIG_TYPE/$CONFIG_FILE" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+            else
+              echo "ERROR: Specified config file './.github/configs/$CONFIG_TYPE/$CONFIG_FILE' does not exist!" >&2
+              exit 1
+            fi
+          else
+            # No config_file specified
+            echo "No config_file input provided."
+
+            if [[ "$CONFIG_MODE" != "everything" ]]; then
+              echo "Using only files starting with '$CONFIG_MODE-' in .github/configs/$CONFIG_TYPE/"
+              FILES=$(find ".github/configs/$CONFIG_TYPE/${CONFIG_MODE}" -type f -name "*.json")
+            else
+              echo "Using all JSON files in .github/configs/$CONFIG_TYPE/"
+              FILES=$(find ".github/configs/$CONFIG_TYPE" -type f -name '*.json')
+            fi
+
+            if [ -z "$FILES" ]; then
+              echo "ERROR: No matching JSON config files found!" >&2
+              exit 1
+            fi
+
+            echo "repos<<EOF" >> $GITHUB_OUTPUT
+            jq -s '[.[]]' $FILES >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+      - name: "Set builddate"
+        id: generate-builddate
+        run: echo "builddate=$(date '+%Y%m%d')" >> $GITHUB_OUTPUT
+
+  Build-Kernel:
+    name: "Build kernel"
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    needs:
+      - Set-repos
+    strategy:
+      max-parallel: 10
+      fail-fast: false
+      matrix:
+        repos: ${{ fromJSON(needs.Set-repos.outputs.repos) }}
+    env:
+      WORKSPACE: ${{ github.workspace }}
+
+      builddate: "${{ needs.Set-repos.outputs.builddate }}"
+      use_dtb: ${{ matrix.repos.use_dtb }}
+
+      KERNEL_NAME: ${{ matrix.repos.kernelSource.name }}
+      KERNEL_REPO: ${{ matrix.repos.kernelSource.repo }}
+      KERNEL_BRANCH: ${{ matrix.repos.kernelSource.branch }}
+      KERNEL_DEVICE: ${{ matrix.repos.kernelSource.device }}
+      KERNEL_DEVICE_VENDOR: ${{ matrix.repos.kernelSource.vendor }}
+
+      EXTRA_CONFIG_NAME: ${{ matrix.repos.kernelSource.extraConfig }}
+      DEFCONFIG_NAME: ${{ matrix.repos.kernelSource.defconfig }}
+
+      kernelSU: ${{ matrix.repos.kernelsu.enable }}
+      kernelSUsetupLink: ${{ matrix.repos.kernelsu.setupLink }}
+      kernelSUsetupArg: ${{ matrix.repos.kernelsu.setupArg }}
+      kernelSUsetupName: ${{ matrix.repos.kernelsu.setupName }}
+      kernelSUsusfsLink: ${{ matrix.repos.kernelsu.susfsLink }}
+      kernelSUneedPatch: ${{ matrix.repos.kernelsu.needPatch }}
+
+      useKernelPatch: ${{ matrix.repos.kp.use }}
+      kpKpimgLink: ${{ matrix.repos.kp.kpimg_link }}
+      useAnykernel: ${{ matrix.repos.AnyKernel3.use }}
+
+      useImage: ${{ matrix.repos.image.use }}
+      ogImageLink: ${{ matrix.repos.image.imageUrl }}
+      ogImageName: ${{ matrix.repos.image.imageName }}
+
+      ccache: ${{ matrix.repos.ccache }}
+      release: ${{ matrix.repos.AnyKernel3.release }}
+    steps:
+      - name: "Install prerequisites"
         run: |
-          git clone --depth=1 --branch lineage-21 https://github.com/LineageOS/android_kernel_oneplus_sdm845.git kernel
-
-      - name: Clone KernelSU
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev
+          sudo apt-get install -y curl git ftp lftp wget libarchive-tools ccache
+          sudo apt-get install -y zip unzip tar gzip bzip2 rar unrar binwalk libelf-dev
+          sudo apt-get install -y checkinstall libncursesw5-dev libsqlite3-dev tk-dev libgdbm-dev libc6-dev libbz2-dev libffi-dev
+          wget https://www.python.org/ftp/python/2.7.18/Python-2.7.18.tgz
+          tar -xvf Python-2.7.18.tgz
+          cd Python-2.7.18
+          ./configure
+          make -j$(nproc)
+          sudo make install
+          curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py
+          sudo python2.7 get-pip.py
+          sudo update-alternatives --install /usr/bin/python python /usr/local/lib/python2.7 1
+          sudo update-alternatives --install /usr/bin/python python /usr/bin/python3 2 || true
+          cd ..
+      - name: "Create cache key from `repos`"
+        if: ${{ env.ccache == 'true' }}
+        id: ccache_key
         run: |
-          git clone --depth=1 https://github.com/tiann/KernelSU.git
-
-      - name: Apply KernelSU patch
-        run: |
-          cd kernel
-          echo -e "\n# KernelSU integration" >> Makefile
-          echo "KERNELSU := yes" >> Makefile
-          echo "KERNELSU_KERNELDIR := ../KernelSU" >> Makefile
-
-      - name: Download Neutron Clang toolchain
-        run: |
-          mkdir clang && cd clang
-          git clone --depth=1 https://github.com/Neutron-Toolchains/aarch64-linux-android-clang.git
-          echo "TOOLCHAIN_PATH=$(pwd)/aarch64-linux-android-clang/bin" >> $GITHUB_ENV
-
-      - name: Build kernel
-        run: |
-          cd kernel
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export KBUILD_BUILD_USER="rainy"
-          export KBUILD_BUILD_HOST="github"
-          export CROSS_COMPILE=aarch64-linux-android-
-          export PATH=$TOOLCHAIN_PATH:$PATH
-
-          make O=out lineage_fajita_defconfig
-          make -j$(nproc) O=out
-
-      - name: Upload compiled kernel
-        uses: actions/upload-artifact@v3
+          ccache -o compression=false -o cache_dir=$HOME/.ccache
+          echo "CACHE_KEY=$(echo -n '${{ toJSON(matrix.repos) }}' | base64 -w 0 | cut -c -48)" >> $GITHUB_OUTPUT
+      - name: "Cache ccache files"
+        if: ${{ env.ccache == 'true' }}
+        uses: actions/cache@v3
         with:
-          name: Image.gz-dtb
-          path: kernel/out/arch/arm64/boot/Image.gz-dtb
+          path: |
+            ~/.ccache
+            ${{ env.OUT_DIR }}
+          key: ccache-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_NAME }}-${{ steps.ccache_key.outputs.CACHE_KEY }}-${{ env.builddate }}-${{ github.run_number }}
+          restore-keys: |
+            ccache-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_NAME }}-${{ steps.ccache_key.outputs.CACHE_KEY }}-${{ env.builddate }}-${{ github.run_number }}
+      - name: "Setup Anykernel3"
+        if: ${{ env.useAnykernel == 'true' }}
+        env:
+          params: "${{ toJSON(matrix.repos.AnyKernel3) }}"
+        run: |
+          ANYKERNEL_REPO=$(echo $params | jq -r ".repo")
+          ANYKERNEL_BRANCH=$(echo $params | jq -r ".branch")
+          git clone --recursive --depth=1 -j $(nproc) --branch $ANYKERNEL_BRANCH $ANYKERNEL_REPO AnyKernel3
+          echo "Setup Anykernel3 => ($ANYKERNEL_REPO)"
+      - name: "Clone kernel source => (${{ env.KERNEL_REPO }})"
+        run: |
+          git clone --recursive --depth=1 -j $(nproc) --branch $KERNEL_BRANCH $KERNEL_REPO $KERNEL_NAME
+          echo -e "\n ! Kernel is at commit: $(git -C $KERNEL_NAME rev-parse HEAD)\n"
+          echo "Clone kernel source => ($KERNEL_REPO)"         
+      - name: "Get toolchains"
+        env:
+          toolchains: "${{ toJSON(matrix.repos.toolchains) }}"
+        run: |
+          toolchains_num="$(echo $toolchains | jq 'length')"
+          echo "There are $toolchains_num defined toolchains."
+          for ((i=0;i<toolchains_num;i++)); do
+            toolchain_name=$(echo $toolchains | jq -r ".[$i].name")
+            toolchain_repo=$(echo $toolchains | jq -r ".[$i].repo")
+            toolchain_branch=$(echo $toolchains | jq -r ".[$i].branch")
+            toolchain_url=$(echo $toolchains | jq -r ".[$i].url")
+
+            echo "Processing toolchain: $toolchain_name"
+
+            if [ -z "${toolchain_url:-}" ] || [ "$toolchain_url" = "null" ]; then
+              echo "Cloning $toolchain_repo (branch: $toolchain_branch)"
+              for attempt in {1..3}; do
+                git clone --recursive --depth=1 -j $(nproc) --branch "$toolchain_branch" "$toolchain_repo" "$toolchain_name" && break
+                echo "Retrying git clone ($attempt/3)..."
+                sleep 5
+                if [ "$attempt" -eq 3 ]; then
+                  echo "git clone failed after 3 attempts."
+                  exit 1
+                fi
+              done
+            else
+              echo "Downloading $toolchain_url"
+              filename="${toolchain_url##*/}"
+              for attempt in {1..3}; do
+                wget -O "$filename" "$toolchain_url" && break
+                echo "Retrying wget ($attempt/3)..."
+                sleep 5
+                if [ "$attempt" -eq 3 ]; then
+                  echo "Download failed after 3 attempts."
+                  exit 1
+                fi
+              done
+              mkdir -p "$toolchain_name"
+              case "$filename" in
+                *.zip)
+                  unzip -d "$toolchain_name" "$filename"
+                  ;;
+                *.tar)
+                  tar xvf "$filename" -C "$toolchain_name"
+                  ;;
+                *.tar.gz)
+                  tar zxvf "$filename" -C "$toolchain_name"
+                  ;;
+                *.rar)
+                  unrar x "$filename" "$toolchain_name"
+                  ;;
+                *)
+                  echo "Unknown file type: $filename"
+                  ;;
+              esac
+            fi
+
+            jq -r ".[$i].binPath[] | tostring" <<< "$toolchains" | while read -r bin_path; do
+              echo "$WORKSPACE/$toolchain_name/$bin_path" >> $GITHUB_PATH
+            done
+          done
+
+      - name: "Set args"
+        id: generate-args
+        env:
+          params: "${{ toJSON(matrix.repos.params) }}"
+          THREAD: $(nproc --all)
+        run: |
+          echo "PATH Variable: $PATH"
+          ARCH=$(echo $params | jq -r ".ARCH")
+          CC=$(echo $params | jq -r ".CC")
+          args="-j${{ env.THREAD }}"
+          if [ -n "${{ env.OUT_DIR }}" ]; then
+            mkdir -p ${{ env.OUT_DIR }} && args="$args O=${{ env.OUT_DIR }}"
+          fi
+          if [ -n "$ARCH" ]; then
+            args="$args ARCH=$ARCH"
+          fi
+          if [ -n "$CC" ]; then
+            if [[ "$CC" == *"/"* ]]; then
+              CC=${{ env.WORKSPACE }}/$CC
+            fi
+            if [ ${{ env.ccache }} = true ]; then
+              args="$args CC=\"ccache $CC\""
+            else
+              args="$args CC=$CC"
+            fi
+          fi
+          while read -r externalCommand; do
+            key=$(echo "$externalCommand" | cut -d= -f1)
+            value=$(echo "$externalCommand" | cut -d= -f2)
+            if [[ "$value" == *"/"* ]]; then
+              value="${{ env.WORKSPACE }}/$value"
+            fi
+            args="$args $key=$value"
+          done < <(jq -r '.externalCommand | to_entries[] | "\(.key)=\(.value)"' <<< "$params")
+          echo "$args"
+          echo "ARCH=$ARCH" >> $GITHUB_OUTPUT
+          echo "args=$args" >> $GITHUB_OUTPUT
+      - name: "Integrate Kernel Root implementation"
+        id: integrate-kernelsu-next
+        working-directory: ${{ env.KERNEL_NAME }}
+        env:
+          arch: ${{ steps.generate-args.outputs.ARCH }}
+        if: ${{ env.kernelSU == 'true' }}
+        run: |
+          echo "" > .scmversion
+          curl -LSs "${{ env.kernelSUsetupLink }}" | bash -s ${{ env.kernelSUsetupArg }}
+          KERNELSU_TYPE_ROOT_IMPL_VERSION=$(cd ${{ env.kernelSUsetupName }} && expr $(/usr/bin/git rev-list --count HEAD) + 10200)
+          echo -e "\nKernelSU Type Root Implementation version: $KERNELSU_TYPE_ROOT_IMPL_VERSION\n"
+          echo -e "KERNELSU_TYPE_ROOT_IMPL_VERSION=$KERNELSU_TYPE_ROOT_IMPL_VERSION" >> $GITHUB_OUTPUT
+
+          if [ ${{ env.kernelSUneedPatch }} = true ]; then
+            cd ${{ env.kernelSUsetupName }}
+            curl ${{ env.kernelSUsusfsLink }} -o susfs.patch
+            patch -p1 < susfs.patch
+            cd ../scripts
+            sed -i 's/ -dirty//g' setlocalversion
+          else
+            cd scripts
+            sed -i 's/ -dirty//g' setlocalversion
+          fi
+      - name: "Make defconfig"
+        working-directory: ${{ env.KERNEL_NAME }}
+        env:
+          args: ${{ steps.generate-args.outputs.args }}
+          arch: ${{ steps.generate-args.outputs.ARCH }}
+        run: |
+          if [[ -n "${{ env.EXTRA_CONFIG_NAME }}" ]]; then
+            make ${{ env.args }} ${{ env.DEFCONFIG_NAME }}
+            make ${{ env.args }} ${{ env.EXTRA_CONFIG_NAME }}
+          else
+            echo "PATH Variable: $PATH"
+            make ${{ env.args }} ${{ env.DEFCONFIG_NAME }}
+          fi
+      - name: "Build kernel"
+        working-directory: ${{ env.KERNEL_NAME }}
+        env:
+          args: ${{ steps.generate-args.outputs.args }}
+        run: |
+          echo "PATH Variable: $PATH"
+          make KCFLAGS="-O2" ${{ env.args }}
+      - name: "Push to out_kernel folder and download ramdisk"
+        env:
+          arch: ${{ steps.generate-args.outputs.ARCH }}
+        run: |
+          mkdir out_kernel
+          ls -al ${{ env.OUT_DIR }}/arch/${{ env.arch }}/boot
+          if [[ "${{ env.use_dtb }}" == "true" ]]; then
+            cp -f ${{ env.OUT_DIR }}/arch/${{ env.arch }}/boot/Image.gz-dtb ./out_kernel
+            cd out_kernel
+
+            echo "[Rainy's Image.gz-dtb extractor] Getting DTB offset from Image.gz-dtb..."
+            OFFSET=$(binwalk "Image.gz-dtb" | grep "Flattened device tree" | awk '{print $1}')
+            if [ -z "$OFFSET" ]; then
+              echo "[Rainy's Image.gz-dtb extractor] Could not find DTB in Image.gz-dtb"
+              exit 1
+            fi
+
+            echo "[Rainy's Image.gz-dtb extractor] Found DTB offset at $OFFSET"
+
+            echo "[Rainy's Image.gz-dtb extractor] Extracting kernel (gzip part)..."
+            dd if="Image.gz-dtb" of="Image.gz" bs=1 count="$OFFSET" status=none
+
+            echo "[Rainy's Image.gz-dtb extractor] Extracting DTB..."
+            dd if="Image.gz-dtb" of="dtb" bs=1 skip="$OFFSET" status=none
+
+            echo "[Rainy's Image.gz-dtb extractor] Decompressing kernel gzip to raw Image..."
+            gzip -cd "Image.gz" > "Image"
+
+            echo "[Rainy's Image.gz-dtb extractor] Done"
+
+            rm -rf Image.gz Image.gz-dtb
+            cd ..
+          else
+            cp -f ${{ env.OUT_DIR }}/arch/${{ env.arch }}/boot/Image ./out_kernel/
+          fi
+          ls -al ./out_kernel/
+      - name: "Patch with kernel patch"
+        if: ${{ env.useKernelPatch == 'true' }}
+        run: |
+          mkdir kernel_patch_processing
+          cd kernel_patch_processing
+          curl -L -O https://github.com/bmax121/KernelPatch/releases/download/0.11.3/kptools-linux
+          curl -L -O ${{ env.kpKpimgLink }}
+          chmod +x ./kptools-linux
+          if [ -e "./kpimg-android" ]; then
+            mv ./kpimg-android ./kpimg
+          fi
+          ./kptools-linux -p -s "RainyPatch@111" -i ../out_kernel/Image -k kpimg -o ./oImage
+          rm -rf ../out_kernel/Image
+          mv ./oImage ../out_kernel/Image
+      - name: "Pack AnyKernel3.zip"
+        if: ${{ env.useAnykernel == 'true' }}
+        run: |
+          ls -al
+          cp -f -r ./out_kernel/. ./AnyKernel3/
+          cd AnyKernel3/
+          if [[ "${{ env.use_dtb }}" != "true" ]]; then
+            mv ./Image ./PreImage
+            gzip -c ./PreImage > ./Image.gz
+            rm -rf ./PreImage
+          else
+            gzip -c Image > Image.gz
+            cat Image.gz dtb > Image.gz-dtb
+            rm -rf Image Image.gz dtb
+          fi
+          zip -q -r "anykernel-${{ env.KERNEL_NAME }}-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_DEVICE }}-${{ env.builddate }}-${{ github.run_number }}" *
+      - name: "Upload AnyKernel3 image"
+        uses: actions/upload-artifact@v4
+        if: ${{ env.useAnykernel == 'true' }}
+        with:
+          name: "anykernel-${{ env.KERNEL_NAME }}-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_DEVICE }}-${{ env.builddate }}-${{ github.run_number }}"
+          path: ./AnyKernel3/anykernel-${{ env.KERNEL_NAME }}-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_DEVICE }}-${{ env.builddate }}-${{ github.run_number }}.zip
+      - name: "Pack kernel image"
+        if: ${{ env.useImage == 'true' }}
+        run: | 
+          curl -L -O https://github.com/Shubhamvis98/AIK/raw/4ac321dfd48e16344e6146c505708aa720ff0bb3/bin/magiskboot_x86
+          chmod +x ./magiskboot_x86
+          mkdir wrap_kernel
+          cd wrap_kernel
+          curl -L -O ${{ env.ogImageLink }}
+          ../magiskboot_x86 unpack ${{ env.ogImageName }}
+          rm -rf ./kernel
+          mv ../out_kernel/Image ./kernel
+          ../magiskboot_x86 repack ${{ env.ogImageName }}
+          cd ..
+          cp -f ./wrap_kernel/new-boot.img ./out_kernel/image-${{ env.KERNEL_NAME }}-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_DEVICE }}-${{ env.builddate }}-${{ github.run_number }}.img
+      - name: "Upload image"
+        if: ${{ env.useImage == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: "image-${{ env.KERNEL_NAME }}-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_DEVICE }}-${{ env.builddate }}-${{ github.run_number }}"
+          path: "out_kernel/image-${{ env.KERNEL_NAME }}-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_DEVICE }}-${{ env.builddate }}-${{ github.run_number }}.img"
+
+  publish:
+    needs: [Set-repos, Build-Kernel]
+    runs-on: ubuntu-latest
+    if: ${{ always() && github.event.inputs.release_mode == 'true' }}
+    env:
+      builddate: "${{ needs.Set-repos.outputs.builddate }}"
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded_kernels
+          merge-multiple: true
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2.1.0
+        with:
+          files: downloaded_kernels/**
+          tag_name: ${{ env.builddate }}.${{ github.run_number }}-${{ github.event.inputs.config_mode }}
+          name: Automation build for ${{ github.event.inputs.config_mode }} from run ${{ github.run_number }}
+          prerelease: false
+          draft: false
+          generate_release_notes: false
+          body: |
+            Open kernel build from RainyLand. Version `${{ env.builddate }}.${{ github.run_number }}-${{ github.event.inputs.config_mode }}`
+            # Installation
+            1. Flash the kernel from this release.
+            2. Download and install the root manager APK from here (depends on your kernel):
+            - **KernelSU-Next:** [Stable Version](https://github.com/KernelSU-Next/KernelSU-Next/releases) / [Nightly Version](https://nightly.link/KernelSU-Next/KernelSU-Next/workflows/build-manager/next/manager)
+            - **APatch:** [Stable Version](https://github.com/bmax121/APatch/releases/latest) / [Nightly Version](https://nightly.link/bmax121/APatch/workflows/build/main/APatch)
+            - **SukiSU-Ultra:** [Stable Version](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases) / [Nightly Version](https://nightly.link/SukiSU-Ultra/SukiSU-Ultra/workflows/build-manager/main/manager)
+            4. Download and install the SuSFS Module from here: https://github.com/sidex15/susfs4ksu-module/releases/latest
+          fail_on_unmatched_files: true
+          preserve_order: true
