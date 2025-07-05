@@ -1,25 +1,25 @@
 {
   "kernelSource": {
-    "device": "umi",
+    "device": "peridot",
     "vendor": "xiaomi",
-    "name": "kernelsu-next",
-    "defconfig": "umi_defconfig",
-    "extraConfig": "",
-    "repo": "https://github.com/kernel-build-from-rainyland/kernel_xiaomi_sm8250_family",
-    "branch": "master"
+    "name": "sukisu-ultra",
+    "defconfig": "gki_defconfig",
+    "extraConfig": "vendor/peridot_GKI.config",
+    "repo": "https://github.com/kernel-build-from-rainyland/kernel_xiaomi_peridot",
+    "branch": "peridot-u-oss"
   },
-  "use_dtb": false,
+  "use_dtb": true,
   "kp": {
     "use": false,
     "kpimg_link": "https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.0/kpimg"
   },
   "kernelsu": {
     "enable": true,
-    "setupLink": "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh",
-    "setupArg": "next",
-    "setupName": "KernelSU-Next",
-    "needPatch": true,
-    "susfsLink": "https://raw.githubusercontent.com/wodanesdag/susfs4ksu/refs/heads/next-4.19/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+    "setupLink": "https://raw.githubusercontent.com/kernel-build-from-rainyland/SukiSU-Ultra/main/kernel/setup.sh",
+    "setupArg": "susfs-main",
+    "setupName": "KernelSU",
+    "needPatch": false,
+    "susfsLink": ""
   },
   "toolchains": [
     {
@@ -57,7 +57,7 @@
     "use": true,
     "release": true,
     "repo": "https://github.com/kernel-build-from-rainyland/AnyKernel3",
-    "branch": "umi"
+    "branch": "xiaomi_peridot"
   },
   "image": {
     "use": false,

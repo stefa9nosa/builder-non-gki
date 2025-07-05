@@ -5,8 +5,8 @@
     "name": "moonwake-sukisu-ultra",
     "defconfig": "ruby_defconfig",
     "extraConfig": "",
-    "repo": "https://github.com/kernel-build-from-rainyland/kernel_xiaomi_ruby",
-    "branch": "ksu-type-root-impl"
+    "repo": "https://github.com/RainyXeon/MoonWake",
+    "branch": "susfs-158"
   },
   "use_dtb": false,
   "kp": {
@@ -15,8 +15,8 @@
   },
   "kernelsu": {
     "enable": true,
-    "setupLink": "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh",
-    "setupArg": "susfs-main",
+    "setupLink": "https://raw.githubusercontent.com/kernel-build-from-rainyland/SukiSU-Ultra/main/kernel/setup.sh",
+    "setupArg": "susfs-stable",
     "setupName": "KernelSU",
     "needPatch": false,
     "susfsLink": ""
