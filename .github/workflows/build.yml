@@ -7,18 +7,18 @@ on:
   workflow_dispatch:
     inputs:
       config_type:
-        description: 'Choose a config type'
+        description: "Choose a config type"
         required: true
         type: choice
-        default: 'production'
+        default: "production"
         options:
           - production
           - development
       config_mode:
-        description: 'Choose a root solution, if this not empty, it will only build that specific type'
+        description: "Choose a root solution, if this not empty, it will only build that specific type"
         required: false
         type: choice
-        default: 'everything'
+        default: "everything"
         options:
           - everything
           - ksun
@@ -26,18 +26,18 @@ on:
           - vanilla
           - kp
       config_file:
-        description: 'Path to a specific config JSON file (optional). Leave blank to use all configs.'
+        description: "Path to a specific config JSON file (optional). Leave blank to use all configs."
         required: false
-        default: ''
+        default: ""
         type: string
       release_mode:
-        description: 'Create a release for this run?'
+        description: "Create a release for this run?"
         required: true
         type: choice
-        default: 'false'
+        default: "false"
         options:
-          - 'true'
-          - 'false'
+          - "true"
+          - "false"
 
 permissions:
   contents: write
@@ -67,7 +67,10 @@ jobs:
             if [ -f "./.github/configs/$CONFIG_TYPE/$CONFIG_FILE" ]; then
               echo "Using specified config file: ./.github/configs/$CONFIG_TYPE/$CONFIG_FILE"
               echo "repos<<EOF" >> $GITHUB_OUTPUT
-              jq -s '[.[]]' "./.github/configs/$CONFIG_TYPE/$CONFIG_FILE" >> $GITHUB_OUTPUT
+              CONFIG_PATH="./.github/configs/$CONFIG_TYPE/$CONFIG_FILE"
+              # Strip BOM
+              sed -i '1s/^\xEF\xBB\xBF//' "$CONFIG_PATH"
+              jq -s '[.[][]]' "$CONFIG_PATH" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
             else
               echo "ERROR: Specified config file './.github/configs/$CONFIG_TYPE/$CONFIG_FILE' does not exist!" >&2
@@ -78,10 +81,12 @@ jobs:
             echo "No config_file input provided."
 
             if [[ "$CONFIG_MODE" != "everything" ]]; then
-              echo "Using only files starting with '$CONFIG_MODE-' in .github/configs/$CONFIG_TYPE/"
+              echo "Using only files from '$CONFIG_MODE' in .github/configs/$CONFIG_TYPE/"
+              find ".github/configs/$CONFIG_TYPE/${CONFIG_MODE}" -type f -name "*.json"
               FILES=$(find ".github/configs/$CONFIG_TYPE/${CONFIG_MODE}" -type f -name "*.json")
             else
               echo "Using all JSON files in .github/configs/$CONFIG_TYPE/"
+              find ".github/configs/$CONFIG_TYPE" -type f -name "*.json"
               FILES=$(find ".github/configs/$CONFIG_TYPE" -type f -name '*.json')
             fi
 
@@ -90,8 +95,23 @@ jobs:
               exit 1
             fi
 
+            repos_json="[]"
+            for process_file in $FILES; do
+              echo "Checking: $process_file"
+              # Strip BOM if present (in-place)
+              sed -i '1s/^\xEF\xBB\xBF//' "$process_file"
+              if ! jq empty "$process_file" >/dev/null 2>&1; then
+                echo "[+] Invalid JSON: $process_file"
+                jq '.' "$process_file"
+                exit 1
+              else
+                echo "[-] Valid: $process_file"
+                repos_json=$(jq -s 'add' <(echo "$repos_json") "$process_file")
+              fi
+            done
+
             echo "repos<<EOF" >> $GITHUB_OUTPUT
-            jq -s '[.[]]' $FILES >> $GITHUB_OUTPUT
+            echo "$repos_json" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           fi
       - name: "Set builddate"
@@ -114,6 +134,7 @@ jobs:
 
       builddate: "${{ needs.Set-repos.outputs.builddate }}"
       use_dtb: ${{ matrix.repos.use_dtb }}
+      use_python2: ${{ matrix.repos.use_python2 }}
 
       KERNEL_NAME: ${{ matrix.repos.kernelSource.name }}
       KERNEL_REPO: ${{ matrix.repos.kernelSource.repo }}
@@ -130,6 +151,7 @@ jobs:
       kernelSUsetupName: ${{ matrix.repos.kernelsu.setupName }}
       kernelSUsusfsLink: ${{ matrix.repos.kernelsu.susfsLink }}
       kernelSUneedPatch: ${{ matrix.repos.kernelsu.needPatch }}
+      build_out: ${{ matrix.repos.params.build_out }}
 
       useKernelPatch: ${{ matrix.repos.kp.use }}
       kpKpimgLink: ${{ matrix.repos.kp.kpimg_link }}
@@ -137,7 +159,6 @@ jobs:
 
       useImage: ${{ matrix.repos.image.use }}
       ogImageLink: ${{ matrix.repos.image.imageUrl }}
-      ogImageName: ${{ matrix.repos.image.imageName }}
 
       ccache: ${{ matrix.repos.ccache }}
       release: ${{ matrix.repos.AnyKernel3.release }}
@@ -145,27 +166,32 @@ jobs:
       - name: "Install prerequisites"
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev
-          sudo apt-get install -y curl git ftp lftp wget libarchive-tools ccache
-          sudo apt-get install -y zip unzip tar gzip bzip2 rar unrar binwalk libelf-dev
-          sudo apt-get install -y checkinstall libncursesw5-dev libsqlite3-dev tk-dev libgdbm-dev libc6-dev libbz2-dev libffi-dev
-          wget https://www.python.org/ftp/python/2.7.18/Python-2.7.18.tgz
-          tar -xvf Python-2.7.18.tgz
-          cd Python-2.7.18
-          ./configure
-          make -j$(nproc)
-          sudo make install
-          curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py
-          sudo python2.7 get-pip.py
-          sudo update-alternatives --install /usr/bin/python python /usr/local/lib/python2.7 1
-          sudo update-alternatives --install /usr/bin/python python /usr/bin/python3 2 || true
-          cd ..
+          sudo apt-get install -y \
+            build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            libssl-dev libfl-dev aria2 curl \
+            git ftp lftp libarchive-tools ccache python3 python3-pip \
+            zip unzip tar gzip bzip2 rar unrar binwalk libelf-dev \
+            checkinstall libncursesw5-dev libsqlite3-dev tk-dev \
+            libgdbm-dev libc6-dev libbz2-dev libffi-dev
+          if [[ "${{ env.use_python2 }}" == "true" ]]; then
+            aria2c --summary-interval=0 --console-log-level=info -x 16 -s 16 https://www.python.org/ftp/python/2.7.18/Python-2.7.18.tgz
+            tar -xvf Python-2.7.18.tgz
+            cd Python-2.7.18
+            ./configure
+            make -j$(nproc)
+            sudo make install
+            curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py
+            sudo python2.7 get-pip.py
+            sudo update-alternatives --install /usr/bin/python python /usr/local/lib/python2.7 1
+            sudo update-alternatives --install /usr/bin/python python /usr/bin/python3 2 || true
+            cd ..
+          fi
       - name: "Create cache key from `repos`"
         if: ${{ env.ccache == 'true' }}
         id: ccache_key
         run: |
           ccache -o compression=false -o cache_dir=$HOME/.ccache
-          echo "CACHE_KEY=$(echo -n '${{ toJSON(matrix.repos) }}' | base64 -w 0 | cut -c -48)" >> $GITHUB_OUTPUT
+          echo "CACHE_KEY=$(echo -n "${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_NAME }}" | sha1sum | cut -c1-12)" >> $GITHUB_OUTPUT
       - name: "Cache ccache files"
         if: ${{ env.ccache == 'true' }}
         uses: actions/cache@v3
@@ -173,9 +199,9 @@ jobs:
           path: |
             ~/.ccache
             ${{ env.OUT_DIR }}
-          key: ccache-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_NAME }}-${{ steps.ccache_key.outputs.CACHE_KEY }}-${{ env.builddate }}-${{ github.run_number }}
+          key: ccache-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_NAME }}-${{ steps.ccache_key.outputs.CACHE_KEY }}
           restore-keys: |
-            ccache-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_NAME }}-${{ steps.ccache_key.outputs.CACHE_KEY }}-${{ env.builddate }}-${{ github.run_number }}
+            ccache-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_NAME }}-${{ steps.ccache_key.outputs.CACHE_KEY }}
       - name: "Setup Anykernel3"
         if: ${{ env.useAnykernel == 'true' }}
         env:
@@ -189,7 +215,7 @@ jobs:
         run: |
           git clone --recursive --depth=1 -j $(nproc) --branch $KERNEL_BRANCH $KERNEL_REPO $KERNEL_NAME
           echo -e "\n ! Kernel is at commit: $(git -C $KERNEL_NAME rev-parse HEAD)\n"
-          echo "Clone kernel source => ($KERNEL_REPO)"         
+          echo "Clone kernel source => ($KERNEL_REPO)"
       - name: "Get toolchains"
         env:
           toolchains: "${{ toJSON(matrix.repos.toolchains) }}"
@@ -219,8 +245,8 @@ jobs:
               echo "Downloading $toolchain_url"
               filename="${toolchain_url##*/}"
               for attempt in {1..3}; do
-                wget -O "$filename" "$toolchain_url" && break
-                echo "Retrying wget ($attempt/3)..."
+                aria2c --summary-interval=0 --console-log-level=info -x 16 -s 16 -o "$filename" "$toolchain_url" && break
+                echo "Retrying aria2 ($attempt/3)..."
                 sleep 5
                 if [ "$attempt" -eq 3 ]; then
                   echo "Download failed after 3 attempts."
@@ -233,10 +259,10 @@ jobs:
                   unzip -d "$toolchain_name" "$filename"
                   ;;
                 *.tar)
-                  tar xvf "$filename" -C "$toolchain_name"
+                  tar xf "$filename" -C "$toolchain_name"
                   ;;
                 *.tar.gz)
-                  tar zxvf "$filename" -C "$toolchain_name"
+                  tar zxf "$filename" -C "$toolchain_name"
                   ;;
                 *.rar)
                   unrar x "$filename" "$toolchain_name"
@@ -272,7 +298,7 @@ jobs:
             if [[ "$CC" == *"/"* ]]; then
               CC=${{ env.WORKSPACE }}/$CC
             fi
-            if [ ${{ env.ccache }} = true ]; then
+            if [ ${{ env.ccache }} = "true" ]; then
               args="$args CC=\"ccache $CC\""
             else
               args="$args CC=$CC"
@@ -331,7 +357,11 @@ jobs:
           args: ${{ steps.generate-args.outputs.args }}
         run: |
           echo "PATH Variable: $PATH"
-          make KCFLAGS="-O2" ${{ env.args }}
+          make ${{ env.args }} ${{ env.build_out }}
+      - name: "Check ccache usage"
+        if: ${{ env.ccache == 'true' }}
+        run: |
+          ccache -s
       - name: "Push to out_kernel folder and download ramdisk"
         env:
           arch: ${{ steps.generate-args.outputs.ARCH }}
@@ -367,19 +397,21 @@ jobs:
           else
             cp -f ${{ env.OUT_DIR }}/arch/${{ env.arch }}/boot/Image ./out_kernel/
           fi
+          if [ -f "${{ env.OUT_DIR }}/arch/${{ env.arch }}/boot/dtbo.img" ]; then
+            cp -f ${{ env.OUT_DIR }}/arch/${{ env.arch }}/boot/dtbo.img ./out_kernel/
+          fi
           ls -al ./out_kernel/
       - name: "Patch with kernel patch"
         if: ${{ env.useKernelPatch == 'true' }}
+        env:
+          APATCH_KEY: ${{ secrets.APATCH_KEY }}
         run: |
           mkdir kernel_patch_processing
           cd kernel_patch_processing
-          curl -L -O https://github.com/bmax121/KernelPatch/releases/download/0.11.3/kptools-linux
-          curl -L -O ${{ env.kpKpimgLink }}
+          curl -L -o kptools-linux https://github.com/bmax121/KernelPatch/releases/download/0.11.3/kptools-linux
+          curl -L -o kpimg-android ${{ env.kpKpimgLink }}
           chmod +x ./kptools-linux
-          if [ -e "./kpimg-android" ]; then
-            mv ./kpimg-android ./kpimg
-          fi
-          ./kptools-linux -p -s "RainyPatch@111" -i ../out_kernel/Image -k kpimg -o ./oImage
+          ./kptools-linux -p -s "$APATCH_KEY" -i ../out_kernel/Image -k kpimg-android -o ./oImage
           rm -rf ../out_kernel/Image
           mv ./oImage ../out_kernel/Image
       - name: "Pack AnyKernel3.zip"
@@ -406,16 +438,16 @@ jobs:
           path: ./AnyKernel3/anykernel-${{ env.KERNEL_NAME }}-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_DEVICE }}-${{ env.builddate }}-${{ github.run_number }}.zip
       - name: "Pack kernel image"
         if: ${{ env.useImage == 'true' }}
-        run: | 
+        run: |
           curl -L -O https://github.com/Shubhamvis98/AIK/raw/4ac321dfd48e16344e6146c505708aa720ff0bb3/bin/magiskboot_x86
           chmod +x ./magiskboot_x86
           mkdir wrap_kernel
           cd wrap_kernel
-          curl -L -O ${{ env.ogImageLink }}
-          ../magiskboot_x86 unpack ${{ env.ogImageName }}
+          curl -L -o original-boot.img ${{ env.ogImageLink }}
+          ../magiskboot_x86 unpack original-boot.img
           rm -rf ./kernel
           mv ../out_kernel/Image ./kernel
-          ../magiskboot_x86 repack ${{ env.ogImageName }}
+          ../magiskboot_x86 repack original-boot.img
           cd ..
           cp -f ./wrap_kernel/new-boot.img ./out_kernel/image-${{ env.KERNEL_NAME }}-${{ env.KERNEL_DEVICE_VENDOR }}-${{ env.KERNEL_DEVICE }}-${{ env.builddate }}-${{ github.run_number }}.img
       - name: "Upload image"

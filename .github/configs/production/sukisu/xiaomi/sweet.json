@@ -1,31 +1,31 @@
 ﻿[
   {
     "kernelSource": {
-      "device": "RMX2020",
-      "vendor": "realme",
-      "name": "sukisu-ultra-susfs-158",
-      "defconfig": "RMX2020_defconfig",
+      "device": "sweet",
+      "vendor": "xiaomi",
+      "name": "sukisu-ultra-susfs-159",
+      "defconfig": "sweet_defconfig",
       "extraConfig": "",
-      "repo": "https://github.com/kernel-build-from-rainyland/kernel_realme_RMX2020",
-      "branch": "susfs-158"
+      "repo": "https://github.com/kernel-build-from-rainyland/kernel_xiaomi_sweet",
+      "branch": "susfs"
     },
-    "use_dtb": true,
+    "use_dtb": false,
     "use_python2": false,
     "kp": {
       "use": false,
-      "kpimg_link": "https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.0/kpimg"
+      "kpimg_link": ""
     },
     "kernelsu": {
       "enable": true,
-      "setupLink": "https://raw.githubusercontent.com/kernel-build-from-rainyland/SukiSU-Ultra/main/kernel/setup.sh",
-      "setupArg": "susfs-stable",
+      "setupLink": "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh",
+      "setupArg": "susfs-main",
       "setupName": "KernelSU",
       "needPatch": false,
       "susfsLink": ""
     },
     "toolchains": [
       {
-        "repo": "https://gitlab.com/sarthakroy2002/android_prebuilts_clang_host_linux-x86_clang-r437112b",
+        "repo": "https://gitlab.com/RainyXeon/clang-r547379.git",
         "branch": "master",
         "name": "clang-AOSP",
         "binPath": ["./bin"]
@@ -60,7 +60,7 @@
       "use": true,
       "release": true,
       "repo": "https://github.com/kernel-build-from-rainyland/AnyKernel3",
-      "branch": "realme_RMX2020"
+      "branch": "sweet"
     },
     "image": {
       "use": false,

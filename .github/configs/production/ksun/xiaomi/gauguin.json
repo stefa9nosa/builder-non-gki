@@ -1,31 +1,31 @@
-﻿[
+[
   {
     "kernelSource": {
-      "device": "RMX2020",
-      "vendor": "realme",
-      "name": "sukisu-ultra-susfs-158",
-      "defconfig": "RMX2020_defconfig",
+      "device": "gauguin",
+      "vendor": "xiaomi",
+      "name": "kernelsu-next",
+      "defconfig": "gauguin_defconfig",
       "extraConfig": "",
-      "repo": "https://github.com/kernel-build-from-rainyland/kernel_realme_RMX2020",
-      "branch": "susfs-158"
+      "repo": "https://github.com/kernel-build-from-rainyland/kernel_xiaomi_gauguin",
+      "branch": "lineage-22.2"
     },
-    "use_dtb": true,
+    "use_dtb": false,
     "use_python2": false,
     "kp": {
       "use": false,
-      "kpimg_link": "https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.0/kpimg"
+      "kpimg_link": ""
     },
     "kernelsu": {
       "enable": true,
-      "setupLink": "https://raw.githubusercontent.com/kernel-build-from-rainyland/SukiSU-Ultra/main/kernel/setup.sh",
-      "setupArg": "susfs-stable",
-      "setupName": "KernelSU",
+      "setupLink": "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/next/kernel/setup.sh",
+      "setupArg": "next",
+      "setupName": "KernelSU-Next",
       "needPatch": false,
       "susfsLink": ""
     },
     "toolchains": [
       {
-        "repo": "https://gitlab.com/sarthakroy2002/android_prebuilts_clang_host_linux-x86_clang-r437112b",
+        "url": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz",
         "branch": "master",
         "name": "clang-AOSP",
         "binPath": ["./bin"]
@@ -35,7 +35,7 @@
     "params": {
       "ARCH": "arm64",
       "CC": "clang-AOSP/bin/clang",
-      "build_out": "Image.gz-dtb",
+      "build_out": "",
       "externalCommand": {
         "KBUILD_BUILD_HOST": "perfc.org",
         "KBUILD_BUILD_USER": "rainyxeon",
@@ -56,15 +56,15 @@
         "LLVM_DIS": "clang-AOSP/bin/llvm-dis"
       }
     },
-    "AnyKernel3": {
-      "use": true,
-      "release": true,
-      "repo": "https://github.com/kernel-build-from-rainyland/AnyKernel3",
-      "branch": "realme_RMX2020"
-    },
     "image": {
+      "use": true,
+      "imageUrl": "https://github.com/kernel-build-from-rainyland/builder-non-gki/releases/download/cloud/xiaomi-gauguin-original-boot.img"
+    },
+    "AnyKernel3": {
       "use": false,
-      "imageUrl": ""
+      "release": true,
+      "repo": "",
+      "branch": ""
     }
   }
 ]
